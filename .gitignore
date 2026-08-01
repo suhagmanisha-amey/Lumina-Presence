@@ -1,0 +1,16 @@
+.env
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Your actual media and drafts stay local — only the structure is tracked.
+assets/library/*
+!assets/library/.gitkeep
+content/queue/*.json
+content/approved/*.json
+content/published/*.json
+content/rejected/*.json
+content/review.html

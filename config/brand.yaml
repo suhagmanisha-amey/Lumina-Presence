@@ -1,0 +1,65 @@
+# Lumina Presence — brand profile
+#
+# Everything the agent knows about you lives here. Fill in the FILL_ME fields
+# before the first run; `lumina doctor` will tell you if any are still blank.
+
+brand:
+  name: "Lumina Presence"
+  # One or two sentences: what you do and who for. The caption writer leans on
+  # this more than anything else in this file.
+  what_we_do: "FILL_ME"
+  audience: "FILL_ME"
+  # Where you're posting from / who you serve. Shapes trend relevance.
+  location: "India"
+
+voice:
+  # 3-6 adjectives. Be specific — "warm, plainspoken, a little wry" beats
+  # "professional and engaging".
+  tone: "FILL_ME"
+  # Things the agent must never do in a caption.
+  never:
+    - "Use the word 'unlock' or 'game-changer'"
+    - "Open with a rhetorical question"
+    - "Stack more than two emoji in a row"
+    - "Invent statistics, prices, dates, or customer quotes"
+  # Optional: paste 1-3 of your own past captions you were happy with.
+  # Few-shot examples move quality more than any instruction you can write.
+  examples: []
+
+content:
+  # Topics the agent should look for when scanning what's trending.
+  themes:
+    - "FILL_ME"
+  # Topics to stay away from entirely.
+  avoid:
+    - "Politics"
+    - "Competitor callouts"
+  caption:
+    max_chars: 900        # Instagram's hard limit is 2200; short performs better.
+    hashtags:
+      count: 8
+      # Always included, in every post.
+      always:
+        - "#LuminaPresence"
+      # Never used, even if the model thinks they fit.
+      banned:
+        - "#followforfollow"
+        - "#likeforlike"
+    # Appended verbatim to the end of every caption. Leave "" for none.
+    call_to_action: ""
+
+schedule:
+  # How many drafts a discovery run should produce.
+  drafts_per_run: 3
+  # Advisory only — recorded on the draft so you know when it was meant for.
+  # Actual cadence is set by the cron in .github/workflows/discover.yml.
+  posting_days: ["Tuesday", "Thursday", "Saturday"]
+  posting_time: "18:30"
+  timezone: "Asia/Kolkata"
+
+safety:
+  # Draft-and-approve is the default and strongly recommended.
+  # Setting this to true lets `lumina publish --all` post without review.
+  allow_autopublish: false
+  # Refuse to publish more than this many posts in 24h, whatever else happens.
+  max_posts_per_day: 2
