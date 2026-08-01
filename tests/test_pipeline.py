@@ -350,6 +350,136 @@ def test_unreadable_quota_does_not_fail_verification(monkeypatch):
     assert all(c.ok for c in checks)
 
 
+# --- peer analysis ---------------------------------------------------------
+
+
+def stub_discovery(monkeypatch, payload: dict):
+    class FakeResponse:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return payload
+
+    monkeypatch.setattr("lumina.sources.peers.requests.get", lambda *a, **k: FakeResponse())
+
+
+DISCOVERY_OK = {
+    "business_discovery": {
+        "followers_count": 10_000,
+        "media_count": 240,
+        "media": {
+            "data": [
+                {
+                    "caption": "Behind the scenes of a repot.",
+                    "like_count": 400,
+                    "comments_count": 100,
+                    "media_type": "CAROUSEL_ALBUM",
+                    "permalink": "https://instagram.com/p/aaa",
+                    "timestamp": "2026-07-01T10:00:00+0000",
+                },
+                {
+                    "caption": "A quiet morning.",
+                    "like_count": 100,
+                    "comments_count": 0,
+                    "media_type": "IMAGE",
+                    "permalink": "https://instagram.com/p/bbb",
+                    "timestamp": "2026-07-02T10:00:00+0000",
+                },
+            ]
+        },
+    }
+}
+
+
+def test_fetch_peer_parses_a_discovery_payload(monkeypatch):
+    from lumina.sources.peers import fetch_peer
+
+    stub_discovery(monkeypatch, DISCOVERY_OK)
+    profile = fetch_peer(live_config(), "@somepeer")
+
+    assert profile.username == "somepeer"  # leading @ stripped
+    assert profile.followers_count == 10_000
+    assert len(profile.posts) == 2
+
+
+def test_engagement_rate_averages_across_posts(monkeypatch):
+    from lumina.sources.peers import fetch_peer
+
+    stub_discovery(monkeypatch, DISCOVERY_OK)
+    profile = fetch_peer(live_config(), "somepeer")
+    # (500 + 100) / 2 posts = 300 mean, over 10_000 followers.
+    assert profile.engagement_rate() == pytest.approx(0.03)
+
+
+def test_top_posts_are_ranked_by_total_engagement(monkeypatch):
+    from lumina.sources.peers import fetch_peer
+
+    stub_discovery(monkeypatch, DISCOVERY_OK)
+    top = fetch_peer(live_config(), "somepeer").top_posts(1)
+    assert top[0].permalink.endswith("aaa")
+
+
+def test_engagement_rate_is_zero_when_follower_count_is_unavailable():
+    from lumina.models import PeerPost, PeerProfile
+
+    profile = PeerProfile(
+        username="x", followers_count=0, posts=[PeerPost(like_count=5)]
+    )
+    assert profile.engagement_rate() == 0.0
+
+
+def test_personal_account_error_is_explained(monkeypatch):
+    from lumina.sources.peers import PeerLookupError, fetch_peer
+
+    stub_discovery(monkeypatch, {"error": {"message": "Invalid user id"}})
+    with pytest.raises(PeerLookupError, match="Business and Creator"):
+        fetch_peer(live_config(), "someone")
+
+
+def test_peer_lookup_requires_instagram_credentials():
+    from lumina.sources.peers import PeerLookupError, fetch_peer
+
+    with pytest.raises(PeerLookupError, match="IG_USER_ID"):
+        fetch_peer(make_config(), "someone")
+
+
+def test_peer_lookup_errors_never_carry_the_token(monkeypatch):
+    import requests as _requests
+
+    from lumina.sources.peers import PeerLookupError, fetch_peer
+
+    def boom(*args, **kwargs):
+        raise _requests.RequestException("failed ?access_token=EAAGsupersecret here")
+
+    monkeypatch.setattr("lumina.sources.peers.requests.get", boom)
+    with pytest.raises(PeerLookupError) as caught:
+        fetch_peer(live_config(), "someone")
+    assert "EAAGsupersecret" not in str(caught.value)
+
+
+def test_peer_ideas_round_trip_to_disk(tmp_path):
+    from lumina.models import Topic
+    from lumina.store import load_peer_ideas, save_peer_ideas
+
+    topics = [Topic(title="Process posts", angle="a", why_now="b", sources=["u"])]
+    save_peer_ideas(topics, tmp_path)
+
+    [loaded] = load_peer_ideas(tmp_path)
+    assert loaded.title == "Process posts"
+
+
+def test_missing_peer_ideas_file_is_not_an_error(tmp_path):
+    from lumina.store import load_peer_ideas
+
+    assert load_peer_ideas(tmp_path) == []
+
+
+def test_peers_config_strips_leading_at_signs():
+    config = make_config(content={"peers": ["@one", "two"]})
+    assert config.peers == ["one", "two"]
+
+
 # --- config ----------------------------------------------------------------
 
 

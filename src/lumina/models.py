@@ -65,6 +65,44 @@ class Topic(BaseModel):
     """URLs backing the claim. A topic with no sources is a red flag."""
 
 
+class PeerPost(BaseModel):
+    """One public post from a peer account, via Instagram Business Discovery."""
+
+    caption: str = ""
+    like_count: int = 0
+    comments_count: int = 0
+    media_type: str = ""
+    permalink: str = ""
+    timestamp: str = ""
+
+    @property
+    def engagement(self) -> int:
+        return self.like_count + self.comments_count
+
+
+class PeerProfile(BaseModel):
+    """A peer account and its recent public posts.
+
+    Only public, aggregate data — the same numbers any visitor sees on the
+    profile. Business Discovery exposes nothing private.
+    """
+
+    username: str
+    followers_count: int = 0
+    media_count: int = 0
+    posts: list[PeerPost] = Field(default_factory=list)
+
+    def engagement_rate(self) -> float:
+        """Mean engagement per post as a share of followers."""
+        if not self.posts or self.followers_count <= 0:
+            return 0.0
+        mean = sum(p.engagement for p in self.posts) / len(self.posts)
+        return mean / self.followers_count
+
+    def top_posts(self, limit: int = 5) -> list[PeerPost]:
+        return sorted(self.posts, key=lambda p: p.engagement, reverse=True)[:limit]
+
+
 class Draft(BaseModel):
     """A proposed post, awaiting your call."""
 

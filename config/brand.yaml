@@ -34,6 +34,18 @@ content:
   avoid:
     - "Politics"
     - "Competitor callouts"
+
+  # Peer accounts in your niche, for `lumina peers`. Handles only, no @.
+  #
+  # These must be Instagram *Business or Creator* accounts — Instagram's
+  # Business Discovery API cannot see personal accounts, and the lookup will
+  # fail for them. Only public data is read: follower count, and the captions
+  # and like/comment counts of recent posts.
+  #
+  # Pick accounts your audience actually also follows, not the biggest names in
+  # the category. A 2M-follower account's engagement patterns tell you very
+  # little about what works at your size.
+  peers: []
   caption:
     max_chars: 900        # Instagram's hard limit is 2200; short performs better.
     hashtags:

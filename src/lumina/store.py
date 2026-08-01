@@ -97,6 +97,31 @@ def used_asset_ids(root: Path | None = None) -> set[str]:
     return ids
 
 
+PEER_IDEAS = "peer-ideas.json"
+
+
+def save_peer_ideas(topics: list, root: Path | None = None) -> Path:
+    """Persist peer-derived angles so `discover --from-peers` can use them."""
+    path = (root or CONTENT_DIR) / PEER_IDEAS
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = [t.model_dump() for t in topics]
+    path.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
+    return path
+
+
+def load_peer_ideas(root: Path | None = None) -> list:
+    from .models import Topic
+
+    path = (root or CONTENT_DIR) / PEER_IDEAS
+    if not path.exists():
+        return []
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return []
+    return [Topic.model_validate(item) for item in raw]
+
+
 def write_json(path: Path, payload: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")

@@ -68,6 +68,30 @@ lumina publish --all   # posts everything approved
 lumina status          # counts by stage
 ```
 
+### Learning from peers in your niche
+
+```bash
+lumina peers                    # read peer accounts, derive content angles
+lumina discover --from-peers    # draft from those angles instead of web research
+```
+
+List handles under `content.peers` in `config/brand.yaml`. This uses Instagram's
+Business Discovery API — public profile data only (follower count, and the
+captions and like/comment counts of recent posts), and it only sees **Business
+and Creator** accounts. Personal accounts will fail the lookup; that's Meta's
+boundary, not a bug.
+
+Two things worth knowing:
+
+- **Pick peers at your scale.** A 2M-follower account's engagement patterns tell
+  you very little about what works at your size. Accounts your audience *also*
+  follows are the useful ones.
+- **It proposes angles, not captions.** The analysis is explicitly instructed to
+  produce transferable observations ("process explainers are outperforming
+  product shots ~3x") rather than reworded versions of a peer's post. Near-copies
+  read as derivative to the audience that follows both accounts, and the captions
+  aren't yours to reuse.
+
 Drafts live as JSON in `content/queue/`. Edit them by hand before approving —
 that's the intended workflow, not a workaround. A caption you rewrote yourself
 is still a caption the agent saved you from writing from scratch.
