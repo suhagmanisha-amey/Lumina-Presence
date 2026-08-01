@@ -181,6 +181,175 @@ def test_instagram_publisher_reports_each_missing_credential():
     assert len(problems) == 3
 
 
+# --- preflight verification ------------------------------------------------
+
+
+def live_config(media_base_url: str = "https://cdn.example.com") -> Config:
+    return Config(
+        raw=make_config().raw,
+        credentials=Credentials(
+            anthropic_api_key="k",
+            ig_user_id="17841400000000000",
+            ig_access_token="tok",
+            media_base_url=media_base_url,
+        ),
+    )
+
+
+def results(checks) -> dict[str, bool]:
+    return {c.label: c.ok for c in checks}
+
+
+def stub_graph(monkeypatch, *, account: dict, quota: dict | None = None):
+    """Route the publisher's Graph API reads to canned payloads."""
+
+    def fake_get(self, path, params):
+        if path.endswith("content_publishing_limit"):
+            if quota is None:
+                from lumina.publish.base import PublishError as _E
+
+                raise _E("no quota endpoint")
+            return quota
+        return account
+
+    monkeypatch.setattr(InstagramPublisher, "_get", fake_get)
+
+
+def stub_media(monkeypatch, *, status: int = 200, content_type: str = "image/jpeg"):
+    class FakeResponse:
+        status_code = status
+        headers = {"content-type": content_type}
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr("lumina.publish.instagram.requests.head", lambda *a, **k: FakeResponse())
+    monkeypatch.setattr("lumina.publish.instagram.requests.get", lambda *a, **k: FakeResponse())
+
+
+def test_verify_passes_for_a_healthy_business_account(monkeypatch):
+    stub_graph(
+        monkeypatch,
+        account={"id": "178414", "username": "lumina", "account_type": "BUSINESS"},
+        quota={"data": [{"quota_usage": 3, "config": {"quota_total": 50}}]},
+    )
+    stub_media(monkeypatch)
+
+    checks = InstagramPublisher().verify(live_config(), "shot.jpg")
+    assert all(c.ok for c in checks), [c for c in checks if not c.ok]
+
+
+def test_verify_flags_a_personal_account(monkeypatch):
+    stub_graph(
+        monkeypatch,
+        account={"id": "1", "username": "someone", "account_type": "PERSONAL"},
+    )
+    stub_media(monkeypatch)
+
+    checks = InstagramPublisher().verify(live_config(), "shot.jpg")
+    assert results(checks)["account type"] is False
+
+
+def test_verify_flags_a_bad_token_and_stops_early(monkeypatch):
+    from lumina.publish.base import PublishError as _E
+
+    def raise_auth(self, path, params):
+        raise _E("Instagram API error 190: invalid token")
+
+    monkeypatch.setattr(InstagramPublisher, "_get", raise_auth)
+
+    checks = InstagramPublisher().verify(live_config(), "shot.jpg")
+    assert results(checks)["account"] is False
+    # No point checking media hosting once the token is dead.
+    assert "media hosting" not in results(checks)
+
+
+def test_verify_rejects_non_https_media_base_url(monkeypatch):
+    stub_graph(
+        monkeypatch,
+        account={"id": "1", "username": "lumina", "account_type": "BUSINESS"},
+    )
+    checks = InstagramPublisher().verify(live_config("http://cdn.example.com"), "a.jpg")
+    assert results(checks)["media hosting"] is False
+
+
+def test_verify_flags_unreachable_media(monkeypatch):
+    stub_graph(
+        monkeypatch,
+        account={"id": "1", "username": "lumina", "account_type": "BUSINESS"},
+    )
+    stub_media(monkeypatch, status=404)
+
+    checks = InstagramPublisher().verify(live_config(), "missing.jpg")
+    assert results(checks)["media hosting"] is False
+
+
+def test_verify_flags_media_served_as_html(monkeypatch):
+    # A private bucket or an SPA fallback commonly returns a 200 HTML page,
+    # which Instagram cannot use as media.
+    stub_graph(
+        monkeypatch,
+        account={"id": "1", "username": "lumina", "account_type": "BUSINESS"},
+    )
+    stub_media(monkeypatch, content_type="text/html")
+
+    checks = InstagramPublisher().verify(live_config(), "a.jpg")
+    assert results(checks)["media hosting"] is False
+
+
+# --- token redaction -------------------------------------------------------
+
+
+def test_scrub_removes_a_known_token():
+    from lumina.publish.instagram import scrub
+
+    assert "EAAGsecret123" not in scrub("failed for EAAGsecret123", "EAAGsecret123")
+
+
+def test_scrub_removes_a_token_from_a_url_query_string():
+    from lumina.publish.instagram import scrub
+
+    text = "GET /v21.0/1?fields=id&access_token=EAAGabc123 (Caused by ProxyError)"
+    cleaned = scrub(text, None)
+    assert "EAAGabc123" not in cleaned
+    # Surrounding context is preserved so the error is still diagnosable.
+    assert "ProxyError" in cleaned and "fields=id" in cleaned
+
+
+def test_network_errors_never_carry_the_token(monkeypatch):
+    import requests as _requests
+
+    def boom(*args, **kwargs):
+        raise _requests.RequestException(
+            "HTTPSConnectionPool: /v21.0/1?access_token=EAAGsupersecret failed"
+        )
+
+    monkeypatch.setattr("lumina.publish.instagram.requests.get", boom)
+    checks = InstagramPublisher().verify(live_config(), "a.jpg")
+
+    blob = " ".join(c.detail for c in checks)
+    assert "EAAGsupersecret" not in blob
+    assert "REDACTED" in blob
+
+
+def test_verify_without_credentials_reports_only_that(monkeypatch):
+    checks = InstagramPublisher().verify(make_config())
+    assert results(checks) == {"credentials": False}
+
+
+def test_unreadable_quota_does_not_fail_verification(monkeypatch):
+    stub_graph(
+        monkeypatch,
+        account={"id": "1", "username": "lumina", "account_type": "BUSINESS"},
+        quota=None,  # endpoint raises
+    )
+    stub_media(monkeypatch)
+
+    checks = InstagramPublisher().verify(live_config(), "a.jpg")
+    assert results(checks)["meta quota"] is True
+    assert all(c.ok for c in checks)
+
+
 # --- config ----------------------------------------------------------------
 
 

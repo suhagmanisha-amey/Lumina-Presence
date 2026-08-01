@@ -1,6 +1,7 @@
 """Command line entry point.
 
-    lumina doctor      check config and credentials
+    lumina doctor      check config and credentials are present
+    lumina verify      call Meta and prove those credentials work
     lumina discover    research topics, pair assets, write drafts
     lumina review      render and open the review page
     lumina approve ID  move a draft to the approved queue
@@ -21,7 +22,7 @@ from . import review as review_module
 from .compose import write_draft
 from .config import ASSET_DIR, ConfigError, load_config
 from .models import Draft, Stage
-from .publish import PublishError, get_publisher
+from .publish import InstagramPublisher, PublishError, get_publisher
 from .sources import find_topics, load_library
 from .store import (
     find,
@@ -99,7 +100,11 @@ def doctor() -> None:
             fg="yellow",
         )
     else:
-        click.secho("  ✓ Instagram credentials present — publishing is live", fg="green")
+        click.secho(
+            "  ✓ Instagram credentials present — run `lumina verify` to confirm "
+            "they work",
+            fg="green",
+        )
 
     click.echo()
     if problems:
@@ -260,6 +265,43 @@ def reject(draft_id: str, note: str) -> None:
 
 
 # --------------------------------------------------------------------------
+
+
+@cli.command()
+def verify() -> None:
+    """Prove the Instagram credentials actually work, before relying on them.
+
+    `doctor` checks the values exist; this one calls Meta and confirms the token
+    authenticates, the account can publish, and your media is fetchable.
+    """
+    config = _load()
+
+    if not config.credentials.can_publish:
+        missing = ", ".join(config.credentials.missing_for_publish())
+        raise click.ClickException(
+            f"Nothing to verify — still in dry-run mode (missing {missing}). "
+            "Add them to .env first."
+        )
+
+    publisher = InstagramPublisher()
+    sample = next((a.filename for a in load_library()), None)
+
+    click.secho("Checking against the Instagram Graph API…", fg="cyan")
+    click.echo()
+
+    checks = publisher.verify(config, sample)
+    for check in checks:
+        mark, colour = ("✓", "green") if check.ok else ("✗", "red")
+        click.secho(f"  {mark} {check.label:<14} {check.detail}", fg=colour)
+
+    click.echo()
+    failed = [c for c in checks if not c.ok]
+    if failed:
+        raise click.ClickException(
+            f"{len(failed)} check(s) failed — publishing would fail too. "
+            "Fix these before running `lumina publish`."
+        )
+    click.secho("Verified. Publishing is live.", fg="green", bold=True)
 
 
 @cli.command()
