@@ -119,8 +119,12 @@ prints exactly what would be posted and changes nothing. The whole pipeline is
 usable in this state, which is the point — you can judge the output quality
 before doing any Meta setup.
 
-Real publishing needs four things, and the first three are Meta's requirements,
-not this project's:
+**[`docs/instagram-setup.md`](docs/instagram-setup.md) is the step-by-step
+walkthrough** — account type, Facebook Page, Meta app, user ID, long-lived
+token, media hosting, in order, with the failure modes for each.
+
+In short, real publishing needs four things, and the first three are Meta's
+requirements, not this project's:
 
 1. An Instagram account converted to **Business** or **Creator** (Settings →
    Account type).
