@@ -31,11 +31,11 @@ voice:
 content:
   # Topics the agent should look for when scanning what's trending.
   themes:
-    - "Executive presence and command authority"
-    - "Military leadership principles applied to civilian/corporate life"
-    - "Being heard in meetings, not just present in them"
-    - "Career advancement for the competent-but-overlooked"
-    - "Body language, tone, and calculated silence as tools of authority"
+    - "Leadership"
+    - "Confidence"
+    - "Competence"
+    - "Growth"
+    - "Communication"
   # Topics to stay away from entirely.
   avoid:
     - "Politics"
@@ -51,7 +51,9 @@ content:
   # Pick accounts your audience actually also follows, not the biggest names in
   # the category. A 2M-follower account's engagement patterns tell you very
   # little about what works at your size.
-  peers: []
+  peers:
+    - "imagecoachshivani"
+    - "evolvewithseemapuri"
   caption:
     max_chars: 900        # Instagram's hard limit is 2200; short performs better.
     hashtags:
