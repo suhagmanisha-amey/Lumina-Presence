@@ -181,6 +181,305 @@ def test_instagram_publisher_reports_each_missing_credential():
     assert len(problems) == 3
 
 
+# --- preflight verification ------------------------------------------------
+
+
+def live_config(media_base_url: str = "https://cdn.example.com") -> Config:
+    return Config(
+        raw=make_config().raw,
+        credentials=Credentials(
+            anthropic_api_key="k",
+            ig_user_id="17841400000000000",
+            ig_access_token="tok",
+            media_base_url=media_base_url,
+        ),
+    )
+
+
+def results(checks) -> dict[str, bool]:
+    return {c.label: c.ok for c in checks}
+
+
+def stub_graph(monkeypatch, *, account: dict, quota: dict | None = None):
+    """Route the publisher's Graph API reads to canned payloads."""
+
+    def fake_get(self, path, params):
+        if path.endswith("content_publishing_limit"):
+            if quota is None:
+                from lumina.publish.base import PublishError as _E
+
+                raise _E("no quota endpoint")
+            return quota
+        return account
+
+    monkeypatch.setattr(InstagramPublisher, "_get", fake_get)
+
+
+def stub_media(monkeypatch, *, status: int = 200, content_type: str = "image/jpeg"):
+    class FakeResponse:
+        status_code = status
+        headers = {"content-type": content_type}
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr("lumina.publish.instagram.requests.head", lambda *a, **k: FakeResponse())
+    monkeypatch.setattr("lumina.publish.instagram.requests.get", lambda *a, **k: FakeResponse())
+
+
+def test_verify_passes_for_a_healthy_business_account(monkeypatch):
+    stub_graph(
+        monkeypatch,
+        account={"id": "178414", "username": "lumina", "account_type": "BUSINESS"},
+        quota={"data": [{"quota_usage": 3, "config": {"quota_total": 50}}]},
+    )
+    stub_media(monkeypatch)
+
+    checks = InstagramPublisher().verify(live_config(), "shot.jpg")
+    assert all(c.ok for c in checks), [c for c in checks if not c.ok]
+
+
+def test_verify_flags_a_personal_account(monkeypatch):
+    stub_graph(
+        monkeypatch,
+        account={"id": "1", "username": "someone", "account_type": "PERSONAL"},
+    )
+    stub_media(monkeypatch)
+
+    checks = InstagramPublisher().verify(live_config(), "shot.jpg")
+    assert results(checks)["account type"] is False
+
+
+def test_verify_flags_a_bad_token_and_stops_early(monkeypatch):
+    from lumina.publish.base import PublishError as _E
+
+    def raise_auth(self, path, params):
+        raise _E("Instagram API error 190: invalid token")
+
+    monkeypatch.setattr(InstagramPublisher, "_get", raise_auth)
+
+    checks = InstagramPublisher().verify(live_config(), "shot.jpg")
+    assert results(checks)["account"] is False
+    # No point checking media hosting once the token is dead.
+    assert "media hosting" not in results(checks)
+
+
+def test_verify_rejects_non_https_media_base_url(monkeypatch):
+    stub_graph(
+        monkeypatch,
+        account={"id": "1", "username": "lumina", "account_type": "BUSINESS"},
+    )
+    checks = InstagramPublisher().verify(live_config("http://cdn.example.com"), "a.jpg")
+    assert results(checks)["media hosting"] is False
+
+
+def test_verify_flags_unreachable_media(monkeypatch):
+    stub_graph(
+        monkeypatch,
+        account={"id": "1", "username": "lumina", "account_type": "BUSINESS"},
+    )
+    stub_media(monkeypatch, status=404)
+
+    checks = InstagramPublisher().verify(live_config(), "missing.jpg")
+    assert results(checks)["media hosting"] is False
+
+
+def test_verify_flags_media_served_as_html(monkeypatch):
+    # A private bucket or an SPA fallback commonly returns a 200 HTML page,
+    # which Instagram cannot use as media.
+    stub_graph(
+        monkeypatch,
+        account={"id": "1", "username": "lumina", "account_type": "BUSINESS"},
+    )
+    stub_media(monkeypatch, content_type="text/html")
+
+    checks = InstagramPublisher().verify(live_config(), "a.jpg")
+    assert results(checks)["media hosting"] is False
+
+
+# --- token redaction -------------------------------------------------------
+
+
+def test_scrub_removes_a_known_token():
+    from lumina.publish.instagram import scrub
+
+    assert "EAAGsecret123" not in scrub("failed for EAAGsecret123", "EAAGsecret123")
+
+
+def test_scrub_removes_a_token_from_a_url_query_string():
+    from lumina.publish.instagram import scrub
+
+    text = "GET /v21.0/1?fields=id&access_token=EAAGabc123 (Caused by ProxyError)"
+    cleaned = scrub(text, None)
+    assert "EAAGabc123" not in cleaned
+    # Surrounding context is preserved so the error is still diagnosable.
+    assert "ProxyError" in cleaned and "fields=id" in cleaned
+
+
+def test_network_errors_never_carry_the_token(monkeypatch):
+    import requests as _requests
+
+    def boom(*args, **kwargs):
+        raise _requests.RequestException(
+            "HTTPSConnectionPool: /v21.0/1?access_token=EAAGsupersecret failed"
+        )
+
+    monkeypatch.setattr("lumina.publish.instagram.requests.get", boom)
+    checks = InstagramPublisher().verify(live_config(), "a.jpg")
+
+    blob = " ".join(c.detail for c in checks)
+    assert "EAAGsupersecret" not in blob
+    assert "REDACTED" in blob
+
+
+def test_verify_without_credentials_reports_only_that(monkeypatch):
+    checks = InstagramPublisher().verify(make_config())
+    assert results(checks) == {"credentials": False}
+
+
+def test_unreadable_quota_does_not_fail_verification(monkeypatch):
+    stub_graph(
+        monkeypatch,
+        account={"id": "1", "username": "lumina", "account_type": "BUSINESS"},
+        quota=None,  # endpoint raises
+    )
+    stub_media(monkeypatch)
+
+    checks = InstagramPublisher().verify(live_config(), "a.jpg")
+    assert results(checks)["meta quota"] is True
+    assert all(c.ok for c in checks)
+
+
+# --- peer analysis ---------------------------------------------------------
+
+
+def stub_discovery(monkeypatch, payload: dict):
+    class FakeResponse:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return payload
+
+    monkeypatch.setattr("lumina.sources.peers.requests.get", lambda *a, **k: FakeResponse())
+
+
+DISCOVERY_OK = {
+    "business_discovery": {
+        "followers_count": 10_000,
+        "media_count": 240,
+        "media": {
+            "data": [
+                {
+                    "caption": "Behind the scenes of a repot.",
+                    "like_count": 400,
+                    "comments_count": 100,
+                    "media_type": "CAROUSEL_ALBUM",
+                    "permalink": "https://instagram.com/p/aaa",
+                    "timestamp": "2026-07-01T10:00:00+0000",
+                },
+                {
+                    "caption": "A quiet morning.",
+                    "like_count": 100,
+                    "comments_count": 0,
+                    "media_type": "IMAGE",
+                    "permalink": "https://instagram.com/p/bbb",
+                    "timestamp": "2026-07-02T10:00:00+0000",
+                },
+            ]
+        },
+    }
+}
+
+
+def test_fetch_peer_parses_a_discovery_payload(monkeypatch):
+    from lumina.sources.peers import fetch_peer
+
+    stub_discovery(monkeypatch, DISCOVERY_OK)
+    profile = fetch_peer(live_config(), "@somepeer")
+
+    assert profile.username == "somepeer"  # leading @ stripped
+    assert profile.followers_count == 10_000
+    assert len(profile.posts) == 2
+
+
+def test_engagement_rate_averages_across_posts(monkeypatch):
+    from lumina.sources.peers import fetch_peer
+
+    stub_discovery(monkeypatch, DISCOVERY_OK)
+    profile = fetch_peer(live_config(), "somepeer")
+    # (500 + 100) / 2 posts = 300 mean, over 10_000 followers.
+    assert profile.engagement_rate() == pytest.approx(0.03)
+
+
+def test_top_posts_are_ranked_by_total_engagement(monkeypatch):
+    from lumina.sources.peers import fetch_peer
+
+    stub_discovery(monkeypatch, DISCOVERY_OK)
+    top = fetch_peer(live_config(), "somepeer").top_posts(1)
+    assert top[0].permalink.endswith("aaa")
+
+
+def test_engagement_rate_is_zero_when_follower_count_is_unavailable():
+    from lumina.models import PeerPost, PeerProfile
+
+    profile = PeerProfile(
+        username="x", followers_count=0, posts=[PeerPost(like_count=5)]
+    )
+    assert profile.engagement_rate() == 0.0
+
+
+def test_personal_account_error_is_explained(monkeypatch):
+    from lumina.sources.peers import PeerLookupError, fetch_peer
+
+    stub_discovery(monkeypatch, {"error": {"message": "Invalid user id"}})
+    with pytest.raises(PeerLookupError, match="Business and Creator"):
+        fetch_peer(live_config(), "someone")
+
+
+def test_peer_lookup_requires_instagram_credentials():
+    from lumina.sources.peers import PeerLookupError, fetch_peer
+
+    with pytest.raises(PeerLookupError, match="IG_USER_ID"):
+        fetch_peer(make_config(), "someone")
+
+
+def test_peer_lookup_errors_never_carry_the_token(monkeypatch):
+    import requests as _requests
+
+    from lumina.sources.peers import PeerLookupError, fetch_peer
+
+    def boom(*args, **kwargs):
+        raise _requests.RequestException("failed ?access_token=EAAGsupersecret here")
+
+    monkeypatch.setattr("lumina.sources.peers.requests.get", boom)
+    with pytest.raises(PeerLookupError) as caught:
+        fetch_peer(live_config(), "someone")
+    assert "EAAGsupersecret" not in str(caught.value)
+
+
+def test_peer_ideas_round_trip_to_disk(tmp_path):
+    from lumina.models import Topic
+    from lumina.store import load_peer_ideas, save_peer_ideas
+
+    topics = [Topic(title="Process posts", angle="a", why_now="b", sources=["u"])]
+    save_peer_ideas(topics, tmp_path)
+
+    [loaded] = load_peer_ideas(tmp_path)
+    assert loaded.title == "Process posts"
+
+
+def test_missing_peer_ideas_file_is_not_an_error(tmp_path):
+    from lumina.store import load_peer_ideas
+
+    assert load_peer_ideas(tmp_path) == []
+
+
+def test_peers_config_strips_leading_at_signs():
+    config = make_config(content={"peers": ["@one", "two"]})
+    assert config.peers == ["one", "two"]
+
+
 # --- config ----------------------------------------------------------------
 
 
@@ -194,8 +493,10 @@ def test_unfilled_fields_are_detected_at_any_depth():
 def test_shipped_config_parses():
     config = load_config()
     assert config.brand_name == "Lumina Presence"
-    # The template ships with placeholders on purpose.
-    assert config.unfilled_fields()
+    # This is the live brand config, not a template — once filled in, it
+    # should have no FILL_ME placeholders left. If this starts failing,
+    # someone reverted a field to the placeholder rather than a real value.
+    assert config.unfilled_fields() == []
 
 
 def test_missing_config_file_raises_a_readable_error(tmp_path):

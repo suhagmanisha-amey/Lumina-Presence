@@ -89,6 +89,10 @@ class Config:
         return [h.lower() for h in (self.get("content.caption.hashtags.banned", []) or [])]
 
     @property
+    def peers(self) -> list[str]:
+        return [str(h).lstrip("@") for h in (self.get("content.peers", []) or [])]
+
+    @property
     def allow_autopublish(self) -> bool:
         return bool(self.get("safety.allow_autopublish", False))
 

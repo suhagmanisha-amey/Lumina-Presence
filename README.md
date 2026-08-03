@@ -60,12 +60,37 @@ Assets without a sidecar still work; their captions are noticeably vaguer.
 ## Using it
 
 ```bash
+lumina verify          # once Meta is connected: prove the credentials work
 lumina discover        # research + draft (this is the agent doing its job)
 lumina review          # opens a review page; also lists the queue in-terminal
 lumina approve <id>    # or: lumina reject <id> --note "off-brand"
 lumina publish --all   # posts everything approved
 lumina status          # counts by stage
 ```
+
+### Learning from peers in your niche
+
+```bash
+lumina peers                    # read peer accounts, derive content angles
+lumina discover --from-peers    # draft from those angles instead of web research
+```
+
+List handles under `content.peers` in `config/brand.yaml`. This uses Instagram's
+Business Discovery API — public profile data only (follower count, and the
+captions and like/comment counts of recent posts), and it only sees **Business
+and Creator** accounts. Personal accounts will fail the lookup; that's Meta's
+boundary, not a bug.
+
+Two things worth knowing:
+
+- **Pick peers at your scale.** A 2M-follower account's engagement patterns tell
+  you very little about what works at your size. Accounts your audience *also*
+  follows are the useful ones.
+- **It proposes angles, not captions.** The analysis is explicitly instructed to
+  produce transferable observations ("process explainers are outperforming
+  product shots ~3x") rather than reworded versions of a peer's post. Near-copies
+  read as derivative to the audience that follows both accounts, and the captions
+  aren't yours to reuse.
 
 Drafts live as JSON in `content/queue/`. Edit them by hand before approving —
 that's the intended workflow, not a workaround. A caption you rewrote yourself
@@ -94,8 +119,12 @@ prints exactly what would be posted and changes nothing. The whole pipeline is
 usable in this state, which is the point — you can judge the output quality
 before doing any Meta setup.
 
-Real publishing needs four things, and the first three are Meta's requirements,
-not this project's:
+**[`docs/instagram-setup.md`](docs/instagram-setup.md) is the step-by-step
+walkthrough** — account type, Facebook Page, Meta app, user ID, long-lived
+token, media hosting, in order, with the failure modes for each.
+
+In short, real publishing needs four things, and the first three are Meta's
+requirements, not this project's:
 
 1. An Instagram account converted to **Business** or **Creator** (Settings →
    Account type).
@@ -118,8 +147,29 @@ IG_ACCESS_TOKEN=EAAG...
 MEDIA_BASE_URL=https://cdn.thelumina.in/ig
 ```
 
-`lumina doctor` will confirm publishing is live. Set any one of them and not the
-others and it stays in dry-run rather than half-working.
+Then confirm it actually works — **before** a real post depends on it:
+
+```bash
+lumina verify
+```
+
+`doctor` only checks the values exist. `verify` calls Meta and proves the token
+authenticates, the account is a Business/Creator account that can publish, and
+your media URL is publicly fetchable and serves an actual image. Every one of
+those failures would otherwise surface mid-publish, after a media container had
+already been created.
+
+```
+  ✓ credentials    all four values present
+  ✓ account        @luminapresence (id 17841400000000000)
+  ✓ account type   BUSINESS
+  ✓ meta quota     3/50 posts used in last 24h
+  ✓ media hosting  https://cdn.thelumina.in/ig/shot.jpg → image/jpeg
+```
+
+Set any one credential and not the others and it stays in dry-run rather than
+half-working. Access tokens are redacted from all error output, so `verify`
+results are safe to paste into an issue.
 
 Once live, `lumina publish` asks for confirmation before posting and refuses to
 exceed `safety.max_posts_per_day`. Both are deliberate friction on an action

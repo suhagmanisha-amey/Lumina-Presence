@@ -1,6 +1,7 @@
 """Command line entry point.
 
-    lumina doctor      check config and credentials
+    lumina doctor      check config and credentials are present
+    lumina verify      call Meta and prove those credentials work
     lumina discover    research topics, pair assets, write drafts
     lumina review      render and open the review page
     lumina approve ID  move a draft to the approved queue
@@ -21,15 +22,18 @@ from . import review as review_module
 from .compose import write_draft
 from .config import ASSET_DIR, ConfigError, load_config
 from .models import Draft, Stage
-from .publish import PublishError, get_publisher
+from .publish import InstagramPublisher, PublishError, get_publisher
 from .sources import find_topics, load_library
+from .sources.peers import PeerLookupError, analyse, fetch_peer
 from .store import (
     find,
     list_drafts,
+    load_peer_ideas,
     move,
     published_in_last_day,
     recent_captions,
     save,
+    save_peer_ideas,
     used_asset_ids,
 )
 
@@ -99,7 +103,11 @@ def doctor() -> None:
             fg="yellow",
         )
     else:
-        click.secho("  ✓ Instagram credentials present — publishing is live", fg="green")
+        click.secho(
+            "  ✓ Instagram credentials present — run `lumina verify` to confirm "
+            "they work",
+            fg="green",
+        )
 
     click.echo()
     if problems:
@@ -113,7 +121,12 @@ def doctor() -> None:
 @cli.command()
 @click.option("--count", type=int, default=None, help="How many drafts to produce.")
 @click.option("--no-assets", is_flag=True, help="Write caption-only drafts.")
-def discover(count: int | None, no_assets: bool) -> None:
+@click.option(
+    "--from-peers",
+    is_flag=True,
+    help="Draft from saved peer angles (run `lumina peers` first) instead of web research.",
+)
+def discover(count: int | None, no_assets: bool, from_peers: bool) -> None:
     """Research what's current, pair it with your assets, write drafts."""
     config = _load()
 
@@ -125,12 +138,22 @@ def discover(count: int | None, no_assets: bool) -> None:
         )
 
     wanted = count or config.drafts_per_run
+    notes = ""
 
-    click.secho("Researching what's current…", fg="cyan")
-    try:
-        topics, notes = find_topics(config, wanted)
-    except Exception as exc:  # noqa: BLE001 — surfaced to the user, not swallowed
-        raise click.ClickException(f"Trend research failed: {exc}") from exc
+    if from_peers:
+        topics = load_peer_ideas()
+        if not topics:
+            raise click.ClickException(
+                "No saved peer angles. Run `lumina peers` first."
+            )
+        click.secho(f"Using {len(topics)} saved peer angle(s).", fg="cyan")
+        topics = topics[:wanted]
+    else:
+        click.secho("Researching what's current…", fg="cyan")
+        try:
+            topics, notes = find_topics(config, wanted)
+        except Exception as exc:  # noqa: BLE001 — surfaced, not swallowed
+            raise click.ClickException(f"Trend research failed: {exc}") from exc
 
     if not topics:
         click.secho(
@@ -197,6 +220,76 @@ def discover(count: int | None, no_assets: bool) -> None:
 
 
 @cli.command()
+@click.option("--count", type=int, default=5, help="How many angles to derive.")
+def peers(count: int) -> None:
+    """Read peer accounts in your niche and derive content angles.
+
+    Uses Instagram's Business Discovery API — public profile data only, and
+    only for Business/Creator accounts. List the handles under
+    `content.peers` in config/brand.yaml.
+    """
+    config = _load()
+
+    handles = config.peers
+    if not handles:
+        raise click.ClickException(
+            "No peers configured. Add handles under `content.peers` in "
+            "config/brand.yaml — pick accounts your audience also follows, "
+            "not the biggest names in the category."
+        )
+
+    click.secho(f"Reading {len(handles)} peer account(s)…", fg="cyan")
+    profiles = []
+    for handle in handles:
+        try:
+            profile = fetch_peer(config, handle)
+        except PeerLookupError as exc:
+            click.secho(f"  ✗ {exc}", fg="red")
+            continue
+
+        profiles.append(profile)
+        click.secho(
+            f"  ✓ @{profile.username}  {profile.followers_count:,} followers, "
+            f"{len(profile.posts)} recent posts, "
+            f"{profile.engagement_rate() * 100:.2f}% mean engagement",
+            fg="green",
+        )
+
+    if not profiles:
+        raise click.ClickException(
+            "No peer profiles could be read. Business Discovery only sees "
+            "Business and Creator accounts — check the handles are spelled "
+            "correctly and are not personal accounts."
+        )
+
+    click.echo()
+    click.secho("Working out what's landing…", fg="cyan")
+    try:
+        topics = analyse(config, profiles, count)
+    except Exception as exc:  # noqa: BLE001 — surfaced, not swallowed
+        raise click.ClickException(f"Peer analysis failed: {exc}") from exc
+
+    if not topics:
+        click.secho(
+            "The peer data was too thin to support real observations. Nothing "
+            "saved — add more peers, or ones that post more often.",
+            fg="yellow",
+        )
+        return
+
+    for topic in topics:
+        click.echo()
+        click.secho(f"  {topic.title}", bold=True)
+        click.echo(f"    {topic.angle}")
+        click.echo(f"    why now: {topic.why_now}")
+
+    path = save_peer_ideas(topics)
+    click.echo()
+    click.secho(f"Saved {len(topics)} angle(s) to {path}", fg="green")
+    click.echo("Draft from them with:  lumina discover --from-peers")
+
+
+@cli.command()
 @click.option("--open/--no-open", "open_browser", default=True, help="Open in a browser.")
 def review(open_browser: bool) -> None:
     """Render the review page and list what's waiting."""
@@ -260,6 +353,43 @@ def reject(draft_id: str, note: str) -> None:
 
 
 # --------------------------------------------------------------------------
+
+
+@cli.command()
+def verify() -> None:
+    """Prove the Instagram credentials actually work, before relying on them.
+
+    `doctor` checks the values exist; this one calls Meta and confirms the token
+    authenticates, the account can publish, and your media is fetchable.
+    """
+    config = _load()
+
+    if not config.credentials.can_publish:
+        missing = ", ".join(config.credentials.missing_for_publish())
+        raise click.ClickException(
+            f"Nothing to verify — still in dry-run mode (missing {missing}). "
+            "Add them to .env first."
+        )
+
+    publisher = InstagramPublisher()
+    sample = next((a.filename for a in load_library()), None)
+
+    click.secho("Checking against the Instagram Graph API…", fg="cyan")
+    click.echo()
+
+    checks = publisher.verify(config, sample)
+    for check in checks:
+        mark, colour = ("✓", "green") if check.ok else ("✗", "red")
+        click.secho(f"  {mark} {check.label:<14} {check.detail}", fg=colour)
+
+    click.echo()
+    failed = [c for c in checks if not c.ok]
+    if failed:
+        raise click.ClickException(
+            f"{len(failed)} check(s) failed — publishing would fail too. "
+            "Fix these before running `lumina publish`."
+        )
+    click.secho("Verified. Publishing is live.", fg="green", bold=True)
 
 
 @cli.command()
