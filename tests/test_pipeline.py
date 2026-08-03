@@ -493,8 +493,10 @@ def test_unfilled_fields_are_detected_at_any_depth():
 def test_shipped_config_parses():
     config = load_config()
     assert config.brand_name == "Lumina Presence"
-    # The template ships with placeholders on purpose.
-    assert config.unfilled_fields()
+    # This is the live brand config, not a template — once filled in, it
+    # should have no FILL_ME placeholders left. If this starts failing,
+    # someone reverted a field to the placeholder rather than a real value.
+    assert config.unfilled_fields() == []
 
 
 def test_missing_config_file_raises_a_readable_error(tmp_path):
