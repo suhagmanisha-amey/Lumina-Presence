@@ -21,7 +21,7 @@ from pydantic import BaseModel, Field
 
 from ..config import Config
 from ..models import PeerPost, PeerProfile, Topic
-from ..publish.instagram import API_VERSION, REQUEST_TIMEOUT, scrub
+from ..publish.instagram import API_VERSION, REQUEST_TIMEOUT, api_family, scrub
 
 BASE = f"https://graph.facebook.com/{API_VERSION}"
 MODEL = "claude-opus-5"
@@ -46,8 +46,18 @@ def fetch_peer(config: Config, username: str) -> PeerProfile:
             + ", ".join(credentials.missing_for_publish())
         )
 
-    handle = username.lstrip("@")
     token = credentials.ig_access_token or ""
+    if api_family(token) == "ig_login":
+        raise PeerLookupError(
+            "Business Discovery isn't available on this account's API. Your "
+            "IG_ACCESS_TOKEN is from Instagram API with Instagram Login "
+            "(direct Instagram login, no Facebook Page) — that product doesn't "
+            "expose Business Discovery at all, on any token. Publishing still "
+            "works fine; `lumina peers` specifically needs the older, "
+            "Facebook-Page-linked Instagram Graph API instead."
+        )
+
+    handle = username.lstrip("@")
     fields = (
         f"business_discovery.username({handle})"
         "{followers_count,media_count,media.limit(" + str(POSTS_PER_PEER) + ")"

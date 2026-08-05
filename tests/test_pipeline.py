@@ -181,6 +181,89 @@ def test_instagram_publisher_reports_each_missing_credential():
     assert len(problems) == 3
 
 
+# --- dual Instagram API family (Graph API vs. Instagram Login) ------------
+
+
+def test_api_family_detects_instagram_login_token():
+    from lumina.publish.instagram import api_family
+
+    assert api_family("IGAAM2ZASrdrElBZ...") == "ig_login"
+
+
+def test_api_family_defaults_to_graph_api():
+    from lumina.publish.instagram import api_family
+
+    assert api_family("EAAGsomeclassictoken") == "graph_api"
+    assert api_family("") == "graph_api"
+
+
+def test_base_for_token_routes_to_the_right_host():
+    from lumina.publish.instagram import base_for_token
+
+    assert "graph.instagram.com" in base_for_token("IGAAxyz")
+    assert "graph.facebook.com" in base_for_token("EAAGxyz")
+
+
+def test_requests_are_routed_by_token_not_a_fixed_host(monkeypatch):
+    seen_urls = []
+
+    class FakeResponse:
+        status_code = 200
+        ok = True
+
+        @staticmethod
+        def json():
+            return {"id": "1", "username": "x", "account_type": "BUSINESS"}
+
+    def fake_get(url, params=None, timeout=None):
+        seen_urls.append(url)
+        return FakeResponse()
+
+    monkeypatch.setattr("lumina.publish.instagram.requests.get", fake_get)
+
+    publisher = InstagramPublisher()
+    publisher._get("me", {"access_token": "IGAAtoken", "fields": "id"})
+    publisher._get("me", {"access_token": "EAAGtoken", "fields": "id"})
+
+    assert "graph.instagram.com" in seen_urls[0]
+    assert "graph.facebook.com" in seen_urls[1]
+
+
+def test_verify_flags_instagram_login_tokens_and_the_peers_limitation(monkeypatch):
+    stub_graph(
+        monkeypatch,
+        account={"id": "1", "username": "lumina", "account_type": "BUSINESS"},
+        quota={"data": [{"quota_usage": 0, "config": {"quota_total": 50}}]},
+    )
+    stub_media(monkeypatch)
+
+    config = Config(
+        raw=make_config().raw,
+        credentials=Credentials(
+            anthropic_api_key="k", ig_user_id="1", ig_access_token="IGAAfaketoken",
+            media_base_url="https://cdn.example.com",
+        ),
+    )
+    checks = InstagramPublisher().verify(config, "a.jpg")
+    family_check = next(c for c in checks if c.label == "API family")
+    assert family_check.ok is True
+    assert "peers" in family_check.detail.lower()
+
+
+def test_peers_refuses_an_instagram_login_token_with_a_clear_reason():
+    from lumina.sources.peers import PeerLookupError, fetch_peer
+
+    config = Config(
+        raw=make_config().raw,
+        credentials=Credentials(
+            anthropic_api_key="k", ig_user_id="1", ig_access_token="IGAAfaketoken",
+            media_base_url="https://cdn.example.com",
+        ),
+    )
+    with pytest.raises(PeerLookupError, match="Business Discovery isn't available"):
+        fetch_peer(config, "somepeer")
+
+
 # --- preflight verification ------------------------------------------------
 
 

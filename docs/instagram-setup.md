@@ -10,6 +10,21 @@ Work top to bottom. Each step produces something the next one needs.
 Meta renames things in this UI often. If a label below doesn't match what you
 see, the *shape* of the step is still right — look for the nearest equivalent.
 
+> **Two different token types exist, and both work.** Meta has two separate
+> products for this: the classic **Instagram Graph API** (steps below — via a
+> linked Facebook Page, tokens starting `EAAG...`), and the newer **Instagram
+> API with Instagram Login** (log into Instagram directly, no Page involved,
+> tokens starting `IGAA...`). `lumina` detects which one you have from the
+> token's prefix and talks to the right Meta server automatically — you don't
+> need to pick, and you don't need to redo anything if you already have one.
+>
+> **The one real difference: peer analysis (`lumina peers`) only works with
+> the classic `EAAG...` flow.** Business Discovery — the API it depends on to
+> read other accounts' public posts — doesn't exist on the newer product, on
+> any token. If you got an `IGAA...` token and want peer analysis too, you'd
+> need a second, classic-flow token for that specifically. Publishing itself
+> works identically either way.
+
 ---
 
 ## 1. Make the Instagram account Professional

@@ -1,11 +1,28 @@
-"""Real publishing via the Instagram Graph API.
+"""Real publishing via Meta's Instagram APIs.
 
-Two-step protocol: create a media container, then publish it. Video containers
-are processed asynchronously and must be polled until they report FINISHED.
+Two-step protocol either way: create a media container, then publish it.
+Video containers are processed asynchronously and must be polled until they
+report FINISHED.
 
-Note the media constraint: the Graph API does not accept file uploads. It
-fetches your media itself from a public HTTPS URL, which is why MEDIA_BASE_URL
-exists — it must serve the same filenames as assets/library/.
+Meta actually has two separate, non-interchangeable products here, and which
+one a given IG_ACCESS_TOKEN belongs to is visible only in its prefix:
+
+- Instagram Graph API — the older path, reached via a Facebook Page linked to
+  the Instagram account (Graph API Explorer, permission checkboxes). Tokens
+  look like "EAAG...". Lives at graph.facebook.com. Supports Business
+  Discovery (reading peer accounts), which the newer product does not.
+- Instagram API with Instagram Login — log into Instagram directly, no
+  Facebook Page involved. Tokens look like "IGAA...". Lives at
+  graph.instagram.com. No Business Discovery.
+
+Both expose the same shape for the two calls that matter here (create a media
+container, then publish it), so `_base_for_token` is the only place the two
+paths actually diverge — everything downstream is written against whichever
+base URL that resolves to.
+
+Note the media constraint, which is identical on both: neither accepts a file
+upload. Each fetches your media itself from a public HTTPS URL, which is why
+MEDIA_BASE_URL exists — it must serve the same filenames as assets/library/.
 """
 
 from __future__ import annotations
@@ -22,7 +39,8 @@ from ..models import Draft
 from .base import PublishError, PublishResult
 
 API_VERSION = "v21.0"
-BASE = f"https://graph.facebook.com/{API_VERSION}"
+GRAPH_API_BASE = f"https://graph.facebook.com/{API_VERSION}"
+IG_LOGIN_API_BASE = f"https://graph.instagram.com/{API_VERSION}"
 
 REQUEST_TIMEOUT = 30
 VIDEO_POLL_SECONDS = 5
@@ -31,6 +49,21 @@ VIDEO_POLL_ATTEMPTS = 60  # ~5 minutes
 # Only these can post via the API. A personal account authenticates fine and
 # then fails at publish, which is why this is checked up front.
 PUBLISHABLE_ACCOUNT_TYPES = {"BUSINESS", "MEDIA_CREATOR", "CREATOR"}
+
+
+def api_family(token: str) -> str:
+    """Which Instagram API a token belongs to, by its prefix.
+
+    This is the one fact Meta actually exposes about which product issued a
+    token — there's no endpoint that tells you. Get it wrong and every call
+    fails authentication, not because the token is invalid but because it's
+    being presented to the wrong server.
+    """
+    return "ig_login" if token.startswith("IGAA") else "graph_api"
+
+
+def base_for_token(token: str) -> str:
+    return IG_LOGIN_API_BASE if api_family(token) == "ig_login" else GRAPH_API_BASE
 
 
 @dataclass(frozen=True)
@@ -69,8 +102,9 @@ class InstagramPublisher:
     # --- internals -------------------------------------------------------
 
     def _post(self, path: str, params: dict[str, str]) -> dict:
+        base = base_for_token(params.get("access_token", ""))
         try:
-            response = requests.post(f"{BASE}/{path}", data=params, timeout=REQUEST_TIMEOUT)
+            response = requests.post(f"{base}/{path}", data=params, timeout=REQUEST_TIMEOUT)
         except requests.RequestException as exc:
             raise PublishError(
                 "Could not reach the Instagram API: "
@@ -79,8 +113,9 @@ class InstagramPublisher:
         return self._parse(response)
 
     def _get(self, path: str, params: dict[str, str]) -> dict:
+        base = base_for_token(params.get("access_token", ""))
         try:
-            response = requests.get(f"{BASE}/{path}", params=params, timeout=REQUEST_TIMEOUT)
+            response = requests.get(f"{base}/{path}", params=params, timeout=REQUEST_TIMEOUT)
         except requests.RequestException as exc:
             raise PublishError(
                 "Could not reach the Instagram API: "
@@ -153,6 +188,23 @@ class InstagramPublisher:
         token = credentials.ig_access_token or ""
         user_id = credentials.ig_user_id or ""
 
+        family = api_family(token)
+        if family == "ig_login":
+            checks.append(
+                Check(
+                    "API family",
+                    True,
+                    "Instagram API with Instagram Login (graph.instagram.com) — "
+                    "detected from the IGAA token prefix. `lumina peers` will not "
+                    "work with this account setup: Business Discovery is only "
+                    "available on the older Facebook-Page-linked API.",
+                )
+            )
+        else:
+            checks.append(
+                Check("API family", True, "Instagram Graph API (graph.facebook.com)")
+            )
+
         # 1. Does the token authenticate, and does it reach *this* account?
         try:
             account = self._get(
@@ -160,14 +212,15 @@ class InstagramPublisher:
                 {"fields": "id,username,account_type", "access_token": token},
             )
         except PublishError as exc:
-            return checks + [
-                Check(
-                    "account",
-                    False,
-                    f"{exc} — check IG_USER_ID is the Instagram *user* id "
-                    "(not the Page id) and that the token has not expired",
-                )
-            ]
+            hint = (
+                "check IG_USER_ID is the id /me returned for this token, and "
+                "that the token has not expired (Instagram-Login tokens are "
+                "short-lived until exchanged for a long-lived one)"
+                if family == "ig_login"
+                else "check IG_USER_ID is the Instagram *user* id (not the Page "
+                "id) and that the token has not expired"
+            )
+            return checks + [Check("account", False, f"{exc} — {hint}")]
 
         username = account.get("username", "unknown")
         account_type = (account.get("account_type") or "").upper()
