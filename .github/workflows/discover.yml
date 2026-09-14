@@ -38,6 +38,18 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: lumina discover --count "${{ inputs.count || '3' }}"
 
+      # content/queue/*.json is gitignored on purpose — locally, drafts stay
+      # out of `git status` noise. But that means the file this step just
+      # wrote is invisible to create-pull-request's own change detection
+      # below (a plain `git status`/`git diff` never sees ignored paths, even
+      # brand new ones), so it silently finds nothing to commit and skips
+      # opening a PR — the draft would exist for the length of this job and
+      # then vanish with the runner. Force-add bypasses .gitignore for these
+      # two paths only, in this CI checkout only; the local ignore rule and
+      # `lumina discover` behavior are untouched.
+      - name: Stage the generated draft (bypasses .gitignore for CI delivery)
+        run: git add -f content/queue content/last-research.md
+
       - name: Open a review PR
         uses: peter-evans/create-pull-request@v6
         with:
