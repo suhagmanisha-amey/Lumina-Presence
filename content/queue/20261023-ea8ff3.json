@@ -1,0 +1,34 @@
+{
+  "id": "20261023-ea8ff3",
+  "created_at": "2026-10-23T12:26:15.475084Z",
+  "stage": "queue",
+  "caption": "A report out today surveying 100 India GCC leaders found AI deployed nearly everywhere — and productivity gains still under 15%.\n\nThe tooling isn't the bottleneck. The transmission is.\n\nYou can run the model, read the output, and form a sound judgement by 9am IST. Then at 7pm you join a call where leadership sits three timezones away, and you have four minutes to make them believe you. That is where the gain is lost — not in the stack.\n\nBeing believed is a learnable discipline. Bearing: how you hold yourself before you speak. Tone: steady, low, unhurried, no upward lilt at the end of a statement of fact. Silence: the two seconds after your recommendation that you do not fill with qualifiers.\n\nThirty-five years of military command taught me that an order delivered without conviction is not an order. It's a suggestion. Most mid-career managers are delivering suggestions and wondering why nothing moves.\n\nFix the delivery.",
+  "hashtags": [
+    "#LuminaPresence",
+    "#ExecutivePresence",
+    "#GCCLeadership",
+    "#IndiaGCC",
+    "#CommandAuthority",
+    "#TheLuminaMethod",
+    "#MidCareerLeaders",
+    "#BoardroomPresence"
+  ],
+  "alt_text": "A plain dark slate background with bold white text reading: AI everywhere. Under 15% gain. The bottleneck isn't the tooling. Small Lumina Presence wordmark at the bottom.",
+  "asset_id": null,
+  "asset_filename": null,
+  "topic": {
+    "title": "GCCs have AI everywhere, under 15% productivity gain",
+    "angle": "For mid-career managers inside India's GCCs, technical capability is no longer the differentiator — being believed when you narrate judgment to a leadership team in another timezone is, and that's bearing and tone, not tooling.",
+    "why_now": "The Embark report surveying 100 India GCC leaders published today (23 Oct 2026) and will be covered across Indian business media for several days.",
+    "sources": [
+      "https://smestreet.in/technology/embark-report-projects-growth-in-indias-gcc-jobs-and-offices-12740472"
+    ]
+  },
+  "rationale": "A stark, text-only slate matches the no-nonsense command tone and lets the report's contrast — ubiquitous AI, flat productivity — land without decoration.",
+  "scheduled_for": null,
+  "reviewed_at": null,
+  "review_note": "",
+  "published_at": null,
+  "instagram_media_id": null,
+  "publish_backend": null
+}
