@@ -1,0 +1,12 @@
+{
+  "version": 2,
+  "skills": {
+    "zapier-sdk": {
+      "source": "zapier/sdk",
+      "commit": "555a2cdfa9ec1b6fbc331f8c8172225a792cec8f",
+      "sourceType": "github",
+      "skillPath": "skills/zapier-sdk/SKILL.md",
+      "computedHash": "13518d280b3e76d94ffc712a50ebf3f528e2a9cda12a00c1cc2bc38262140eff"
+    }
+  }
+}
